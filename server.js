@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const Anthropic = require('@anthropic-ai/sdk');
 const Sentry = require('@sentry/node');
-const Redis = require('ioredis');
+//const Redis = require('ioredis');
 
 
 const app = express();
@@ -15,8 +15,8 @@ app.use(express.static('.'));
 Sentry.init({ dsn: process.env.SENTRY_DSN });
 
 // Redis
-const redis = new Redis(process.env.REDIS_URL);
-redis.flushall();
+//const redis = new Redis(process.env.REDIS_URL);
+//redis.flushall();
 
 // Anthropic
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -25,9 +25,9 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 app.post('/assess', async (req, res) => {
   try {
     const { bodyPart, symptoms, severity, description } = req.body;
-    const cacheKey = `assess:${bodyPart}:${severity}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) return res.json(JSON.parse(cached));
+    //const cacheKey = `assess:${bodyPart}:${severity}`;
+    //const cached = await redis.get(cacheKey);
+    //if (cached) return res.json(JSON.parse(cached));
 
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -58,7 +58,7 @@ IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown. Do not u
     console.log('Claude raw response:', message.content[0].text);
     const result = JSON.parse(message.content[0].text);
     console.log('Parsed result:', result);
-    await redis.setex(cacheKey, 3600, JSON.stringify(result));
+    //await redis.setex(cacheKey, 3600, JSON.stringify(result));
     res.json(result);
   } catch (err) {
     Sentry.captureException(err);
@@ -70,9 +70,9 @@ IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown. Do not u
 app.post('/recovery-plan', async (req, res) => {
   try {
     const { assessment } = req.body;
-    const cacheKey = `plan:${assessment.injury_type}:${assessment.severity_level}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) return res.json(JSON.parse(cached));
+    //const cacheKey = `plan:${assessment.injury_type}:${assessment.severity_level}`;
+    //const cached = await redis.get(cacheKey);
+    //if (cached) return res.json(JSON.parse(cached));
 
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -105,7 +105,7 @@ IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown. Do not u
     });
 
     const result = JSON.parse(message.content[0].text);
-    await redis.setex(cacheKey, 3600, JSON.stringify(result));
+    //await redis.setex(cacheKey, 3600, JSON.stringify(result));
     res.json(result);
   } catch (err) {
     Sentry.captureException(err);
