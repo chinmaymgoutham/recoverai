@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RecoverAI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <style>
+    body { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .glass { background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); }
+  </style>
+</head>
+<body class="min-h-screen text-white p-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-10">
+      <h1 class="text-5xl font-bold mb-3">RecoverAI</h1>
+      <p class="text-slate-300 text-lg">AI-powered injury assessment and recovery coach for athletes</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-8">
+      <div class="glass rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-2xl font-semibold mb-4">Injury Intake</h2>
+        <div class="space-y-4">
+          <input id="bodyPart" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600" placeholder="Body part (e.g. knee)" />
+          <input id="symptoms" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600" placeholder="Symptoms (e.g. swelling, pain when bending)" />
+          <input id="severity" type="number" min="1" max="10" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600" placeholder="Severity 1-10" />
+          <textarea id="description" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600 h-28" placeholder="Describe how the injury happened"></textarea>
+          <button id="assessBtn" onclick="assessInjury()" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-3 rounded-lg">Assess Injury</button>
+        </div>
+      </div>
+
+      <div class="glass rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-2xl font-semibold mb-4">Assessment Result</h2>
+        <div id="assessmentResult" class="text-slate-200">Your AI injury assessment will appear here.</div>
+        <button id="planBtn" onclick="generatePlan()" class="hidden mt-5 w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 rounded-lg">Generate 4-Week Recovery Plan</button>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-8 mt-8">
+      <div class="glass rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-2xl font-semibold mb-4">Recovery Plan</h2>
+        <div id="recoveryPlan" class="text-slate-200">Your personalized plan will appear here.</div>
+      </div>
+
+      <div class="glass rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-2xl font-semibold mb-4">Progress Tracker</h2>
+        <canvas id="progressChart" height="220"></canvas>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-8 mt-8">
+      <div class="glass rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-2xl font-semibold mb-4">Red Flag Check</h2>
+        <button onclick="checkAlert()" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-semibold py-3 rounded-lg mb-4">Check for Red Flags</button>
+        <div id="alertResult" class="text-slate-200">Safety screen will appear here.</div>
+      </div>
+
+      <div class="glass rounded-2xl p-6 shadow-2xl">
+        <h2 class="text-2xl font-semibold mb-4">Movement Analysis</h2>
+        <video id="video" class="w-full rounded-lg mb-3" autoplay playsinline></video>
+        <canvas id="poseCanvas" class="w-full rounded-lg"></canvas>
+        <button onclick="startPose()" class="mt-4 w-full bg-violet-500 hover:bg-violet-600 text-white font-semibold py-3 rounded-lg">Start Pose Tracking</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentAssessment = null;
+    let progressChart = null;
+
+    async function assessInjury() {
+    const btn = document.getElementById('assessBtn');
+    btn.innerText = 'Analyzing...';
+    btn.disabled = true;
+
+    const bodyPart = document.getElementById('bodyPart').value;
+    const symptoms = document.getElementById('symptoms').value;
+    const severity = document.getElementById('severity').value;
+    const description = document.getElementById('description').value;
+
+    try {
+        const res = await fetch('/assess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bodyPart, symptoms, severity, description })
+        });
+
+        const data = await res.json();
+        currentAssessment = data;
+
+        document.getElementById('assessmentResult').innerHTML = `
+        <div class="space-y-2">
+            <p><strong>Injury Type:</strong> ${data.injury_type}</p>
+            <p><strong>Affected Area:</strong> ${data.affected_area}</p>
+            <p><strong>Severity:</strong> ${data.severity_level}/10</p>
+            <p><strong>Recommended Specialist:</strong> ${data.recommended_specialist}</p>
+            <p><strong>Summary:</strong> ${data.summary}</p>
+            <p><strong>Immediate Care Needed:</strong> ${data.requires_immediate_care ? 'Yes' : 'No'}</p>
+        </div>
+        `;
+
+        document.getElementById('generatePlanBtn').classList.remove('hidden');
+    } catch (err) {
+        document.getElementById('assessmentResult').innerHTML = `<p class="text-red-400">Error: ${err.message}</p>`;
+    }
+
+    btn.innerText = 'Assess Injury';
+    btn.disabled = false;
+    }
+
+async function generatePlan() {
+  const btn = document.getElementById('planBtn');
+  btn.innerText = 'Generating...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/recovery-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assessment: currentAssessment })
+    });
+
+    const data = await res.json();
+
+    document.getElementById('recoveryPlan').innerHTML = data.weeks.map(week => `
+      <div class="mb-6 p-4 rounded-lg bg-slate-800/70">
+        <h3 class="text-xl font-bold mb-2">Week ${week.week}: ${week.focus}</h3>
+        <p class="mb-2"><strong>Goal:</strong> ${week.goal}</p>
+        <div class="space-y-2">
+          ${week.exercises.map(ex => `
+            <div class="border-l-4 border-cyan-400 pl-3">
+              <p><strong>${ex.name}</strong> — ${ex.sets} sets × ${ex.reps}</p>
+              <p class="text-slate-300 text-sm">${ex.instructions}</p>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    renderChart();
+  } catch (err) {
+    document.getElementById('recoveryPlan').innerHTML = `<p class="text-red-400">Error: ${err.message}</p>`;
+  }
+
+  btn.innerText = 'Generate 4-Week Recovery Plan';
+  btn.disabled = false;
+}
+
+
+    async function checkAlert() {
+      const symptoms = document.getElementById('symptoms').value;
+      const severity = document.getElementById('severity').value;
+
+      const res = await fetch('/alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symptoms, severity })
+      });
+
+      const data = await res.json();
+
+      document.getElementById('alertResult').innerHTML = `
+        <p><strong>Urgency:</strong> ${data.urgency_level}</p>
+        <p><strong>Recommendation:</strong> ${data.recommendation}</p>
+        <p><strong>Red Flags:</strong> ${data.red_flags.length ? data.red_flags.join(', ') : 'None detected'}</p>
+      `;
+    }
+
+    function renderChart() {
+      const ctx = document.getElementById('progressChart').getContext('2d');
+      if (progressChart) progressChart.destroy();
+
+      progressChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+          datasets: [{
+            label: 'Recovery Progress %',
+            data: [20, 45, 70, 90],
+            borderColor: '#22d3ee',
+            backgroundColor: 'rgba(34, 211, 238, 0.2)',
+            tension: 0.35,
+            fill: true
+          }]
+        },
+        options: {
+          plugins: { legend: { labels: { color: 'white' } } },
+          scales: {
+            x: { ticks: { color: 'white' } },
+            y: { ticks: { color: 'white' }, beginAtZero: true, max: 100 }
+          }
+        }
+      });
+    }
+
+    async function startPose() {
+      const videoElement = document.getElementById('video');
+      const canvasElement = document.getElementById('poseCanvas');
+      const canvasCtx = canvasElement.getContext('2d');
+
+      const pose = new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      });
+
+      pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      pose.onResults(results => {
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.poseLandmarks) {
+          drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#22d3ee', lineWidth: 4 });
+          drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#ef4444', lineWidth: 2 });
+        }
+
+        canvasCtx.restore();
+      });
+
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await pose.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+      });
+
+      camera.start();
+    }
+  </script>
+</body>
+</html>
