@@ -5,9 +5,10 @@ const Anthropic = require('@anthropic-ai/sdk');
 const Sentry = require('@sentry/node');
 const Redis = require('ioredis');
 
+
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static('.'));
 
 // Sentry
@@ -48,7 +49,9 @@ Use EXACTLY these field names:
 Body part: ${bodyPart}
 Symptoms: ${symptoms}
 Severity: ${severity}/10
-Description: ${description}`
+Description: ${description}
+
+IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown. Do not use backticks. Do not add any text before or after the JSON.`
       }]
     });
 
@@ -76,7 +79,7 @@ app.post('/recovery-plan', async (req, res) => {
       max_tokens: 2048,
       messages: [{
         role: 'user',
-        content: `You are a physical therapy AI. Generate a 4-week recovery plan and respond ONLY with valid JSON in this format:
+        content: `You are a physical therapy AI. Respond ONLY with a raw JSON object. No markdown, no code blocks, just JSON.
 {
   "weeks": [
     {
@@ -86,7 +89,7 @@ app.post('/recovery-plan', async (req, res) => {
       "exercises": [
         {
           "name": "string",
-          "sets": number,
+          "sets": 3,
           "reps": "string",
           "instructions": "string"
         }
@@ -95,8 +98,9 @@ app.post('/recovery-plan', async (req, res) => {
   ]
 }
 
-Assessment:
-${JSON.stringify(assessment)}`
+Assessment: ${JSON.stringify(assessment)}
+
+IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown. Do not use backticks. Do not add any text before or after the JSON.`
       }]
     });
 
@@ -119,15 +123,17 @@ app.post('/alert', async (req, res) => {
       max_tokens: 512,
       messages: [{
         role: 'user',
-        content: `You are a medical safety screener. Check for red flags and respond ONLY with valid JSON:
+        content: `You are a medical safety screener. Respond ONLY with a raw JSON object. No markdown, no code blocks, just JSON.
 {
   "red_flags": [],
-  "urgency_level": "low|medium|high|emergency",
+  "urgency_level": "low",
   "recommendation": "string"
 }
 
 Symptoms: ${symptoms}
-Severity: ${severity}/10`
+Severity: ${severity}/10
+
+IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown. Do not use backticks. Do not add any text before or after the JSON.`
       }]
     });
 
@@ -139,7 +145,43 @@ Severity: ${severity}/10`
   }
 });
 
+// POST /transcribe
+app.post('/transcribe', async (req, res) => {
+  try {
+    const { audioBase64 } = req.body;
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+
+    const response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+        'Content-Type': 'audio/webm'
+      },
+      body: audioBuffer
+    });
+
+    const data = await response.json();
+    const transcript = data.results.channels[0].alternatives[0].transcript;
+    res.json({ transcript });
+
+  } catch (err) {
+    Sentry.captureException(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/agents', (req, res) => {
+  res.json({
+    injury_agent: process.env.INJURY_AGENT_ADDRESS,
+    recovery_agent: process.env.RECOVERY_AGENT_ADDRESS,
+    alert_agent: process.env.ALERT_AGENT_ADDRESS,
+    status: 'connected'
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`RecoverAI server running on port ${PORT}`);
 });
+
+

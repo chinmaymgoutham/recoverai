@@ -18,7 +18,7 @@
   <div class="max-w-6xl mx-auto">
     <div class="text-center mb-10">
       <h1 class="text-5xl font-bold mb-3">RecoverAI</h1>
-      <p class="text-slate-300 text-lg">AI-powered injury assessment and recovery coach for athletes</p>
+      <p class="text-slate-300 text-lg">AI-powered injury assessment and recovery coach</p>
     </div>
 
     <div class="grid md:grid-cols-2 gap-8">
@@ -28,7 +28,8 @@
           <input id="bodyPart" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600" placeholder="Body part (e.g. knee)" />
           <input id="symptoms" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600" placeholder="Symptoms (e.g. swelling, pain when bending)" />
           <input id="severity" type="number" min="1" max="10" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600" placeholder="Severity 1-10" />
-          <textarea id="description" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600 h-28" placeholder="Describe how the injury happened"></textarea>
+          <textarea id="description" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-600 h-28" placeholder="Describe how the injury happened, OR use the mic below to speak"></textarea>
+          <button id="micBtn" onclick="toggleRecording()" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-3 rounded-lg">🎙️ Record Voice Description</button>
           <button id="assessBtn" onclick="assessInjury()" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-3 rounded-lg">Assess Injury</button>
         </div>
       </div>
@@ -47,9 +48,15 @@
       </div>
 
       <div class="glass rounded-2xl p-6 shadow-2xl">
-        <h2 class="text-2xl font-semibold mb-4">Progress Tracker</h2>
-        <canvas id="progressChart" height="220"></canvas>
-      </div>
+  <h2 class="text-2xl font-semibold mb-4">Progress Tracker</h2>
+  <div class="flex gap-2 mb-4">
+    <button onclick="updateRomChart('left')"  class="flex-1 bg-slate-700 hover:bg-slate-600 text-sm py-2 rounded-lg">Left Side</button>
+    <button onclick="updateRomChart('right')" class="flex-1 bg-slate-700 hover:bg-slate-600 text-sm py-2 rounded-lg">Right Side</button>
+    <button onclick="clearRomHistory()" class="bg-rose-700 hover:bg-rose-600 text-sm px-3 py-2 rounded-lg">Reset</button>
+  </div>
+  <canvas id="progressChart" height="220"></canvas>
+  <p id="chartNote" class="text-slate-400 text-xs mt-2 text-center">Run a movement session to log real data. Simulated data shown until then.</p>
+</div>
     </div>
 
     <div class="grid md:grid-cols-2 gap-8 mt-8">
@@ -61,16 +68,109 @@
 
       <div class="glass rounded-2xl p-6 shadow-2xl">
         <h2 class="text-2xl font-semibold mb-4">Movement Analysis</h2>
-        <video id="video" class="w-full rounded-lg mb-3" autoplay playsinline></video>
+        <video id="video" class="hidden" autoplay playsinline></video>
         <canvas id="poseCanvas" class="w-full rounded-lg"></canvas>
-        <button onclick="startPose()" class="mt-4 w-full bg-violet-500 hover:bg-violet-600 text-white font-semibold py-3 rounded-lg">Start Pose Tracking</button>
+        <div class="mt-4 grid grid-cols-2 gap-2">
+    <button onclick="startPose('knee')" class="bg-violet-500 hover:bg-violet-600 text-white font-semibold py-2 rounded-lg">Track Knee</button>
+    <button onclick="startPose('shoulder')" class="bg-violet-500 hover:bg-violet-600 text-white font-semibold py-2 rounded-lg">Track Shoulder</button>
+    <button onclick="startPose('hip')" class="bg-violet-500 hover:bg-violet-600 text-white font-semibold py-2 rounded-lg">Track Hip</button>
+    <button onclick="startPose('elbow')" class="bg-violet-500 hover:bg-violet-600 text-white font-semibold py-2 rounded-lg">Track Elbow</button>
+</div>
+<div id="romDisplay" class="mt-4 space-y-2 text-sm"></div>
       </div>
+
+      <div class="glass rounded-2xl p-6 shadow-2xl mt-8">
+      <h2 class="text-2xl font-semibold mb-4">AI Agent Network</h2>
+      <div id="agentStatus" class="space-y-2 text-slate-300">Loading agents...</div>
     </div>
   </div>
 
   <script>
     let currentAssessment = null;
     let progressChart = null;
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    function calculateAngle(A, B, C) {
+    const radians = Math.atan2(C.y - B.y, C.x - B.x) - Math.atan2(A.y - B.y, A.x - B.x);
+    let angle = Math.abs(radians * 180.0 / Math.PI);
+    if (angle > 180) angle = 360 - angle;
+    return Math.round(angle);
+    }
+
+
+    function speak(text) {
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.95;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    const voices = speechSynthesis.getVoices();
+    const preferred = voices.find(v => v.name.includes('Google') && v.lang === 'en-US');
+    if (preferred) utterance.voice = preferred;
+    speechSynthesis.speak(utterance);
+    }
+
+    window.speechSynthesis.onvoiceschanged = () => {
+  speak("Welcome to RecoverAI. I'm your AI-powered injury recovery coach. Please describe your injury to get started.");
+};
+
+    async function loadAgents() {
+    const res = await fetch('/agents');
+    const data = await res.json();
+    document.getElementById('agentStatus').innerHTML = `
+        <p>🟢 <strong>Injury Assessment Agent:</strong> ${data.injury_agent}</p>
+        <p>🟢 <strong>Recovery Plan Agent:</strong> ${data.recovery_agent}</p>
+        <p>🟢 <strong>Alert Agent:</strong> ${data.alert_agent}</p>
+        <p class="text-emerald-400 font-semibold mt-2">Status: ${data.status}</p>
+    `;
+    }
+
+    loadAgents();
+
+    async function toggleRecording() {
+    const btn = document.getElementById('micBtn');
+    if (!isRecording) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+        mediaRecorder.onstop = async () => {
+        btn.innerText = '⏳ Transcribing...';
+        btn.disabled = true;
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+            const base64 = reader.result.split(',')[1];
+            const res = await fetch('/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audioBase64: base64 })
+            });
+            const data = await res.json();
+            document.getElementById('description').value = data.transcript;
+            speak("Transcription complete. Click Assess Injury when ready.");
+            btn.innerText = '🎙️ Record Voice Description';
+            btn.disabled = false;
+        };
+        reader.readAsDataURL(audioBlob);
+        };
+        speak("Recording started. Please describe your injury now.");
+        mediaRecorder.start();
+        isRecording = true;
+        btn.innerText = '⏹️ Stop Recording';
+        btn.classList.replace('bg-indigo-500', 'bg-red-500');
+        btn.classList.replace('hover:bg-indigo-600', 'hover:bg-red-600');
+    } else {
+        speak("Got it. Transcribing now.");
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+        isRecording = false;
+        btn.classList.replace('bg-red-500', 'bg-indigo-500');
+        btn.classList.replace('hover:bg-red-600', 'hover:bg-indigo-600');
+    }
+    }
 
     async function assessInjury() {
     const btn = document.getElementById('assessBtn');
@@ -103,7 +203,8 @@
         </div>
         `;
 
-        document.getElementById('generatePlanBtn').classList.remove('hidden');
+        speak(`Assessment complete. You have a ${data.injury_type} affecting your ${data.affected_area}. Severity level ${data.severity_level} out of 10. ${data.summary}.`);
+        document.getElementById('planBtn').classList.remove('hidden');
     } catch (err) {
         document.getElementById('assessmentResult').innerHTML = `<p class="text-red-400">Error: ${err.message}</p>`;
     }
@@ -141,7 +242,8 @@ async function generatePlan() {
       </div>
     `).join('');
 
-    renderChart();
+    speak(`Your 4-week recovery plan is ready. Week 1 focuses on ${data.weeks[0].focus}. Your goal is ${data.weeks[0].goal}.`);
+    updateRomChart();
   } catch (err) {
     document.getElementById('recoveryPlan').innerHTML = `<p class="text-red-400">Error: ${err.message}</p>`;
   }
@@ -168,6 +270,8 @@ async function generatePlan() {
         <p><strong>Recommendation:</strong> ${data.recommendation}</p>
         <p><strong>Red Flags:</strong> ${data.red_flags.length ? data.red_flags.join(', ') : 'None detected'}</p>
       `;
+
+      speak(`Safety check complete. Urgency level: ${data.urgency_level}. ${data.recommendation}.`);
     }
 
     function renderChart() {
@@ -197,48 +301,212 @@ async function generatePlan() {
       });
     }
 
-    async function startPose() {
-      const videoElement = document.getElementById('video');
-      const canvasElement = document.getElementById('poseCanvas');
-      const canvasCtx = canvasElement.getContext('2d');
+    let romHistory = JSON.parse(localStorage.getItem('romHistory') || '[]');
 
-      const pose = new Pose({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-      });
+async function startPose(joint = 'knee') {
+  const videoElement = document.getElementById('video');
+  const canvasElement = document.getElementById('poseCanvas');
+  const canvasCtx = canvasElement.getContext('2d');
 
-      pose.setOptions({
-        modelComplexity: 1,
-        smoothLandmarks: true,
-        enableSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
+  speak(`Starting ${joint} movement analysis. Please stand in front of your camera and slowly move your ${joint}.`);
 
-      pose.onResults(results => {
-        canvasElement.width = videoElement.videoWidth;
-        canvasElement.height = videoElement.videoHeight;
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+  const pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
 
-        if (results.poseLandmarks) {
-          drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#22d3ee', lineWidth: 4 });
-          drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#ef4444', lineWidth: 2 });
-        }
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
 
-        canvasCtx.restore();
-      });
+  let maxLeftAngle = 0;
+  let maxRightAngle = 0;
 
-      const camera = new Camera(videoElement, {
-        onFrame: async () => {
-          await pose.send({ image: videoElement });
+  pose.onResults(results => {
+    canvasElement.width = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.poseLandmarks) {
+      const lm = results.poseLandmarks;
+      drawConnectors(canvasCtx, lm, POSE_CONNECTIONS, { color: '#22d3ee', lineWidth: 4 });
+      drawLandmarks(canvasCtx, lm, { color: '#ef4444', lineWidth: 2 });
+
+      // ── JOINT LANDMARK INDICES ──────────────────────────
+      const joints = {
+        knee: {
+          left:  [lm[23], lm[25], lm[27]], // hip, knee, ankle
+          right: [lm[24], lm[26], lm[28]]
         },
-        width: 640,
-        height: 480
-      });
+        shoulder: {
+          left:  [lm[11], lm[13], lm[15]], // shoulder, elbow, wrist (arm angle)
+          right: [lm[12], lm[14], lm[16]]
+        },
+        hip: {
+          left:  [lm[11], lm[23], lm[25]], // shoulder, hip, knee
+          right: [lm[12], lm[24], lm[26]]
+        },
+        elbow: {
+          left:  [lm[11], lm[13], lm[15]], // shoulder, elbow, wrist
+          right: [lm[12], lm[14], lm[16]]
+        }
+      };
 
-      camera.start();
+      const selected = joints[joint];
+      const leftAngle  = calculateAngle(...selected.left);
+      const rightAngle = calculateAngle(...selected.right);
+
+      if (leftAngle  > maxLeftAngle)  maxLeftAngle  = leftAngle;
+      if (rightAngle > maxRightAngle) maxRightAngle = rightAngle;
+
+      // ── SYMMETRY ─────────────────────────────────────────
+      const diff = Math.abs(leftAngle - rightAngle);
+      let symmetryMsg = '';
+      let symmetryColor = '#22d3ee';
+      if (diff <= 10) {
+        symmetryMsg = '✅ Good symmetry';
+        symmetryColor = '#22d3ee';
+      } else if (diff <= 25) {
+        symmetryMsg = `⚠️ Mild asymmetry (${diff}° difference)`;
+        symmetryColor = '#f59e0b';
+      } else {
+        symmetryMsg = `🔴 Significant asymmetry (${diff}° difference)`;
+        symmetryColor = '#ef4444';
+      }
+
+      // ── FORM FEEDBACK ────────────────────────────────────
+      let formFeedback = '';
+      if (joint === 'knee') {
+        const leftKnee  = lm[25];
+        const leftAnkle = lm[27];
+        const rightKnee = lm[26];
+        const rightAnkle= lm[28];
+        if (Math.abs(leftKnee.x - leftAnkle.x) > 0.05) {
+          formFeedback = '⚠️ Left knee caving inward — keep knee over toes';
+        } else if (Math.abs(rightKnee.x - rightAnkle.x) > 0.05) {
+          formFeedback = '⚠️ Right knee caving inward — keep knee over toes';
+        } else {
+          formFeedback = '✅ Good knee alignment';
+        }
+      }
+      if (joint === 'shoulder') {
+        const leftShoulder  = lm[11];
+        const rightShoulder = lm[12];
+        const tilt = Math.abs(leftShoulder.y - rightShoulder.y);
+        formFeedback = tilt > 0.05
+          ? '⚠️ Shoulders uneven — try to level them'
+          : '✅ Shoulders level';
+      }
+
+      // ── DRAW ANGLES ON CANVAS ────────────────────────────
+      const drawAngle = (landmark, angle, color) => {
+        const x = landmark.x * canvasElement.width;
+        const y = landmark.y * canvasElement.height;
+        canvasCtx.fillStyle = color;
+        canvasCtx.font = 'bold 18px sans-serif';
+        canvasCtx.fillText(`${angle}°`, x + 10, y - 10);
+      };
+      drawAngle(selected.left[1],  leftAngle,  '#22d3ee');
+      drawAngle(selected.right[1], rightAngle, '#a78bfa');
+
+      // ── UPDATE UI ─────────────────────────────────────────
+      document.getElementById('romDisplay').innerHTML = `
+        <div class="p-3 rounded-lg bg-slate-800/70 space-y-1">
+          <p class="font-semibold text-cyan-400">📐 Range of Motion — ${joint.charAt(0).toUpperCase() + joint.slice(1)}</p>
+          <p>Left:  <strong>${leftAngle}°</strong> (max session: ${maxLeftAngle}°)</p>
+          <p>Right: <strong>${rightAngle}°</strong> (max session: ${maxRightAngle}°)</p>
+          <p style="color:${symmetryColor}">${symmetryMsg}</p>
+          ${formFeedback ? `<p>${formFeedback}</p>` : ''}
+        </div>
+      `;
     }
+
+    canvasCtx.restore();
+  });
+
+  // ── SAVE SESSION ON STOP ──────────────────────────────────
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await pose.send({ image: videoElement });
+    },
+    width: 640,
+    height: 480
+  });
+
+  camera.start();
+
+  // Save ROM data after 15 seconds for progress tracking
+  setTimeout(() => {
+    const entry = {
+      date: new Date().toLocaleDateString(),
+      joint,
+      leftMax: maxLeftAngle,
+      rightMax: maxRightAngle
+    };
+    romHistory.push(entry);
+    localStorage.setItem('romHistory', JSON.stringify(romHistory));
+    updateRomChart();
+    speak(`Session saved. Your maximum ${joint} angle was ${maxRightAngle} degrees on the right and ${maxLeftAngle} degrees on the left.`);
+  }, 15000);
+}
+
+    function updateRomChart(side = 'right') {
+  const ctx = document.getElementById('progressChart').getContext('2d');
+  if (progressChart) progressChart.destroy();
+
+  let labels, dataPoints, label;
+
+  if (romHistory.length > 0) {
+    labels     = romHistory.map(e => e.date);
+    dataPoints = romHistory.map(e => side === 'right' ? e.rightMax : e.leftMax);
+    label      = `Max ${side.charAt(0).toUpperCase() + side.slice(1)} ROM (°)`;
+    document.getElementById('chartNote').innerText = `Showing ${romHistory.length} real session(s).`;
+  } else {
+    labels     = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+    dataPoints = [45, 75, 105, 130];
+    label      = 'Simulated ROM Progress (°)';
+  }
+
+  progressChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label,
+        data: dataPoints,
+        borderColor: '#22d3ee',
+        backgroundColor: 'rgba(34, 211, 238, 0.2)',
+        tension: 0.35,
+        fill: true,
+        pointRadius: 5,
+        pointBackgroundColor: '#22d3ee'
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: 'white' } } },
+      scales: {
+        x: { ticks: { color: 'white' } },
+        y: { ticks: { color: 'white' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function clearRomHistory() {
+  romHistory = [];
+  localStorage.removeItem('romHistory');
+  updateRomChart();
+  speak('Progress history cleared.');
+}
+
+updateRomChart();    
+
+
   </script>
 </body>
 </html>
